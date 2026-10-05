@@ -1,0 +1,27 @@
+{
+  "endpoints": {
+    "general": {
+      "baseUrl": "http://localhost:11434",
+      "model": "qwen3:1.7b"
+    },
+    "coding": {
+      "baseUrl": "http://localhost:11435",
+      "model": "qwen2.5-coder:3b"
+    }
+  },
+  "roleBindings": {
+    "Architect": "general",
+    "TechLead": "general",
+    "CoderA": "coding",
+    "CoderB": "coding",
+    "Repair": "coding",
+    "QA": "general",
+    "Docs": "general",
+    "Deployment": "general"
+  },
+  "workspace": "demo",
+  "applicationProject": "demo/DemoApi/DemoApi.csproj",
+  "testProject": "demo/DemoApi.Tests/DemoApi.Tests.csproj",
+  "briefFile": "input/feature-brief.md",
+  "artifactRoot": "artifacts"
+}

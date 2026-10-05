@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/demo/">
+    <Project Path="demo/DemoApi.Tests/DemoApi.Tests.csproj" />
+    <Project Path="demo/DemoApi/DemoApi.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/LocalLlm.Orchestrator/LocalLlm.Orchestrator.csproj" />
+  </Folder>
+</Solution>
