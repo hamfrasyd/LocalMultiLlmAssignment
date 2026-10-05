@@ -1,23 +1,18 @@
 {
   "endpoints": {
     "general": {
-      "baseUrl": "http://localhost:11434",
-      "model": "qwen3:1.7b"
+      "baseUrl": "http://127.0.0.1:11434",
+      "model": "qwen3:8b"
     },
     "coding": {
-      "baseUrl": "http://localhost:11435",
-      "model": "qwen2.5-coder:3b"
+      "baseUrl": "http://127.0.0.1:11435",
+      "model": "deepseek-coder:6.7b"
     }
   },
   "roleBindings": {
     "Architect": "general",
-    "TechLead": "general",
-    "CoderA": "coding",
-    "CoderB": "coding",
-    "Repair": "coding",
-    "QA": "general",
-    "Docs": "general",
-    "Deployment": "general"
+    "Developer": "coding",
+    "Tester": "coding"
   },
   "workspace": "demo",
   "applicationProject": "demo/DemoApi/DemoApi.csproj",

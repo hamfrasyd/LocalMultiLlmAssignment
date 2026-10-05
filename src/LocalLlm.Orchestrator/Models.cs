@@ -18,21 +18,6 @@ public sealed class ModelEndpointSettings
     public string Model { get; init; } = "";
 }
 
-public sealed class TicketPlan
-{
-    public List<WorkTicket> Tickets { get; init; } = [];
-}
-
-public sealed class WorkTicket
-{
-    public string Id { get; init; } = "";
-    public string Title { get; init; } = "";
-    public string Goal { get; init; } = "";
-    public List<string> AcceptanceCriteria { get; init; } = [];
-    public List<string> OwnedPaths { get; init; } = [];
-    public List<string> DependsOn { get; init; } = [];
-}
-
 public sealed class FileProposal
 {
     public string Summary { get; init; } = "";

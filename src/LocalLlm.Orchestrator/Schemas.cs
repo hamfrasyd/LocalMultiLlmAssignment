@@ -4,63 +4,6 @@ namespace LocalLlm.Orchestrator;
 
 public static class Schemas
 {
-    public static JsonElement TicketPlan { get; } =
-        Parse("""
-        {
-          "type": "object",
-          "properties": {
-            "tickets": {
-              "type": "array",
-              "minItems": 2,
-              "maxItems": 2,
-              "items": {
-                "type": "object",
-                "properties": {
-                  "id": {
-                    "type": "string"
-                  },
-                  "title": {
-                    "type": "string"
-                  },
-                  "goal": {
-                    "type": "string"
-                  },
-                  "acceptanceCriteria": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "ownedPaths": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "dependsOn": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "required": [
-                  "id",
-                  "title",
-                  "goal",
-                  "acceptanceCriteria",
-                  "ownedPaths",
-                  "dependsOn"
-                ]
-              }
-            }
-          },
-          "required": [
-            "tickets"
-          ]
-        }
-        """);
-
     public static JsonElement FileProposal { get; } =
         Parse("""
         {

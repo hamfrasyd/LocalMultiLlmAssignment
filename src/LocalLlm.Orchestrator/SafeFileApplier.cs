@@ -55,13 +55,14 @@ public static class SafeFileApplier
         }
     }
 
-    public static void EnsureValidCoderPaths(
-    FileProposal proposal)
+    public static void EnsureValidAgentPaths(
+        FileProposal proposal,
+        bool testsOnly)
     {
         if (proposal.Files.Count is < 1 or > 5)
         {
             throw new InvalidOperationException(
-                $"A coding worker proposed {proposal.Files.Count} files. " +
+                $"An agent proposed {proposal.Files.Count} files. " +
                 "The allowed range is 1 to 5.");
         }
 
@@ -69,21 +70,30 @@ public static class SafeFileApplier
         {
             var normalizedPath = Normalize(file.Path);
 
-            var isAllowed =
+            var isTestPath =
                 normalizedPath.StartsWith(
-                    "DemoApi/",
-                    StringComparison.OrdinalIgnoreCase)
-                || normalizedPath.StartsWith(
                     "DemoApi.Tests/",
                     StringComparison.OrdinalIgnoreCase);
+            var isAllowed =
+                isTestPath
+                || (!testsOnly
+                    && (normalizedPath.StartsWith(
+                            "DemoApi/",
+                            StringComparison.OrdinalIgnoreCase)
+                        || normalizedPath.StartsWith(
+                            "docs/",
+                            StringComparison.OrdinalIgnoreCase)));
 
             if (!isAllowed)
             {
                 throw new InvalidOperationException(
-                    $"Coding worker proposed an invalid path: " +
+                    $"{(testsOnly ? "Tester" : "Developer")} proposed " +
+                    $"an invalid path: " +
                     $"{file.Path}. " +
-                    "Coder paths must begin with DemoApi/ " +
-                    "or DemoApi.Tests/.");
+                    (testsOnly
+                        ? "Tester paths must begin with DemoApi.Tests/."
+                        : "Developer paths must begin with DemoApi/, " +
+                          "DemoApi.Tests/, or docs/."));
             }
 
             if (normalizedPath.EndsWith(
@@ -94,14 +104,14 @@ public static class SafeFileApplier
                     StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
-                    $"Coding worker attempted to create or replace " +
+                    $"An agent attempted to create or replace " +
                     $"a project/solution file: {file.Path}");
             }
 
             if (string.IsNullOrWhiteSpace(file.Content))
             {
                 throw new InvalidOperationException(
-                    $"Coding worker returned empty content for: " +
+                    $"An agent returned empty content for: " +
                     file.Path);
             }
         }

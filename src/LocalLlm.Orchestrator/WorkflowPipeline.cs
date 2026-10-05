@@ -26,25 +26,14 @@ public sealed class WorkflowPipeline
         _settings = settings;
         _ollamaClient = ollamaClient;
 
-        _repositoryRoot =
-            Directory.GetCurrentDirectory();
-
-        _workspacePath =
-            Path.GetFullPath(
-                Path.Combine(
-                    _repositoryRoot,
-                    settings.Workspace));
-
-        _artifactRoot =
-            Path.GetFullPath(
-                Path.Combine(
-                    _repositoryRoot,
-                    settings.ArtifactRoot));
-
-        _runDirectory =
-            Path.Combine(
-                _artifactRoot,
-                $"run-{DateTime.Now:yyyyMMdd-HHmmss}");
+        _repositoryRoot = Directory.GetCurrentDirectory();
+        _workspacePath = Path.GetFullPath(
+            Path.Combine(_repositoryRoot, settings.Workspace));
+        _artifactRoot = Path.GetFullPath(
+            Path.Combine(_repositoryRoot, settings.ArtifactRoot));
+        _runDirectory = Path.Combine(
+            _artifactRoot,
+            $"run-{DateTime.Now:yyyyMMdd-HHmmss}");
 
         Directory.CreateDirectory(_runDirectory);
     }
@@ -54,411 +43,127 @@ public sealed class WorkflowPipeline
     {
         PrintRoutingTable();
 
-        var briefPath =
-            Path.GetFullPath(
-                Path.Combine(
-                    _repositoryRoot,
-                    _settings.BriefFile));
+        var briefPath = Path.GetFullPath(
+            Path.Combine(_repositoryRoot, _settings.BriefFile));
+        var brief = await File.ReadAllTextAsync(
+            briefPath,
+            cancellationToken);
+        var repositorySnapshot = RepositorySnapshot.Build(_workspacePath);
 
-        var brief =
-            await File.ReadAllTextAsync(
-                briefPath,
-                cancellationToken);
-
-        var initialSnapshot =
-            RepositorySnapshot.Build(
-                _workspacePath);
-
-        // -------------------------------------------------
-        // 1. Architecture
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[1/8] Running Architect...");
-
-        var architecture =
-            await ChatRoleAsync(
-                "Architect",
-                Prompts.ArchitectSystem,
-                Prompts.Architect(
-                    brief,
-                    initialSnapshot),
-                cancellationToken: cancellationToken);
-
+        Console.WriteLine("\n[1/3] Running Architect...");
+        var architecture = await ChatRoleAsync(
+            "Architect",
+            Prompts.ArchitectSystem,
+            Prompts.Architect(brief, repositorySnapshot),
+            cancellationToken: cancellationToken);
         await SaveArtifactAsync(
             "architecture.md",
             architecture,
             cancellationToken);
 
-        // -------------------------------------------------
-        // 2. Tech lead
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[2/8] Running Tech Lead...");
-
-        var ticketJson =
-            await ChatRoleAsync(
-                "TechLead",
-                Prompts.TechLeadSystem,
-                Prompts.TechLead(
-                    brief,
-                    architecture,
-                    initialSnapshot),
-                Schemas.TicketPlan,
-                cancellationToken);
-
+        Console.WriteLine("\n[2/3] Running Developer...");
+        var developerProposal = await GenerateFileProposalAsync(
+            "Developer",
+            Prompts.DeveloperSystem,
+            Prompts.Developer(brief, architecture, repositorySnapshot),
+            "developer-proposal",
+            testsOnly: false,
+            cancellationToken);
+        var developerJson = JsonSerializer.Serialize(
+            developerProposal,
+            JsonOptions);
         await SaveArtifactAsync(
-            "tickets.json",
-            ticketJson,
+            "developer-proposal.json",
+            developerJson,
             cancellationToken);
 
-        var ticketPlan =
-            Deserialize<TicketPlan>(ticketJson);
-
-        if (ticketPlan.Tickets.Count != 2)
-        {
-            throw new InvalidOperationException(
-                "Tech Lead must return exactly two tickets.");
-        }
-
-        // -------------------------------------------------
-        // 3. Two coding workers sequentially
-        // -------------------------------------------------
-        Console.WriteLine(
-            "\n[3/8] Running partitioned Coder A and Coder B...");
-
-        var coderA =
-            await GenerateCoderProposalAsync(
-                "CoderA",
-                ticketPlan.Tickets[0],
+        Console.WriteLine("\n[3/3] Running Tester...");
+        var testerProposal = await GenerateFileProposalAsync(
+            "Tester",
+            Prompts.TesterSystem,
+            Prompts.Tester(
+                brief,
                 architecture,
-                initialSnapshot,
-                cancellationToken);
-
-        Console.WriteLine(
-            "  Running Coder B...");
-
-        var coderB =
-            await GenerateCoderProposalAsync(
-                "CoderB",
-                ticketPlan.Tickets[1],
-                architecture,
-                initialSnapshot,
-                cancellationToken);
+                repositorySnapshot,
+                developerJson),
+            "tester-proposal",
+            testsOnly: true,
+            cancellationToken);
+        var testerJson = JsonSerializer.Serialize(
+            testerProposal,
+            JsonOptions);
+        await SaveArtifactAsync(
+            "tester-proposal.json",
+            testerJson,
+            cancellationToken);
 
         SafeFileApplier.EnsureNoCollisions(
-            coderA,
-            coderB);
-
+            developerProposal,
+            testerProposal);
         SafeFileApplier.PrintPreview(
             _workspacePath,
-            coderA,
-            coderB);
+            developerProposal,
+            testerProposal);
 
-        if (!HumanApproval.Ask(
-                "Apply the two coding proposals?"))
+        if (!HumanApproval.Ask("Apply the Developer and Tester proposals?"))
         {
-            Console.WriteLine(
-                "Stopped before file edits.");
-
+            Console.WriteLine("Stopped before file edits.");
             return;
         }
 
         SafeFileApplier.Apply(
             _workspacePath,
-            coderA,
-            coderB);
+            developerProposal,
+            testerProposal);
 
-        var firstDiff =
-            await CaptureGitDiffAsync(
-                cancellationToken);
+        Console.WriteLine("\nBuild and test gate...");
+        ProcessResult buildResult;
+        ProcessResult testResult;
 
-        await SaveArtifactAsync(
-            "git-diff-after-coders.txt",
-            firstDiff,
-            cancellationToken);
-
-        // -------------------------------------------------
-        // 4. Build and test
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[4/8] Build and test gate...");
-
-        if (!HumanApproval.Ask(
-                "Run dotnet build and dotnet test?"))
+        if (HumanApproval.Ask("Run dotnet build and dotnet test?"))
         {
-            Console.WriteLine(
-                "Stopped before command execution.");
-
-            return;
+            buildResult = await RunBuildAsync(cancellationToken);
+            testResult = await RunTestsAsync(cancellationToken);
         }
-
-        var buildResult =
-            await RunBuildAsync(
-                cancellationToken);
-
-        var testResult =
-            await RunTestsAsync(
-                cancellationToken);
+        else
+        {
+            buildResult = NotRun("Build was not run because the user did not approve it.");
+            testResult = NotRun("Tests were not run because the user did not approve them.");
+        }
 
         await SaveProcessArtifactAsync(
             "build-results.txt",
             buildResult,
             cancellationToken);
-
         await SaveProcessArtifactAsync(
             "test-results.txt",
             testResult,
             cancellationToken);
 
-        // -------------------------------------------------
-        // 5. One controlled repair attempt
-        // -------------------------------------------------
-
-        if (buildResult.ExitCode != 0
-            || testResult.ExitCode != 0)
-        {
-            Console.WriteLine(
-                "\nBuild or tests failed.");
-
-            if (HumanApproval.Ask(
-                    "Ask the Repair worker for one fix attempt?"))
-            {
-                var failedSnapshot =
-                    RepositorySnapshot.Build(
-                        _workspacePath);
-
-                var repairJson =
-                    await ChatRoleAsync(
-                        "Repair",
-                        Prompts.RepairSystem,
-                        Prompts.Repair(
-                            architecture,
-                            failedSnapshot,
-                            FormatProcessResult(buildResult),
-                            FormatProcessResult(testResult)),
-                        Schemas.FileProposal,
-                        cancellationToken);
-
-                await SaveArtifactAsync(
-                    "repair-proposal.json",
-                    repairJson,
-                    cancellationToken);
-
-                var repair =
-                    Deserialize<FileProposal>(
-                        repairJson);
-
-                SafeFileApplier.PrintPreview(
-                    _workspacePath,
-                    repair);
-
-                if (HumanApproval.Ask(
-                        "Apply the repair proposal?"))
-                {
-                    SafeFileApplier.Apply(
-                        _workspacePath,
-                        repair);
-
-                    if (HumanApproval.Ask(
-                            "Re-run build and tests?"))
-                    {
-                        buildResult =
-                            await RunBuildAsync(
-                                cancellationToken);
-
-                        testResult =
-                            await RunTestsAsync(
-                                cancellationToken);
-
-                        await SaveProcessArtifactAsync(
-                            "build-results-after-repair.txt",
-                            buildResult,
-                            cancellationToken);
-
-                        await SaveProcessArtifactAsync(
-                            "test-results-after-repair.txt",
-                            testResult,
-                            cancellationToken);
-                    }
-                }
-            }
-        }
-
-        // -------------------------------------------------
-        // 6. QA report
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[5/8] Running QA...");
-
-        var currentDiff =
-            await CaptureGitDiffAsync(
-                cancellationToken);
-
-        var qualityReport =
-            await ChatRoleAsync(
-                "QA",
-                Prompts.QaSystem,
-                Prompts.Qa(
-                    brief,
-                    architecture,
-                    FormatProcessResult(buildResult),
-                    FormatProcessResult(testResult),
-                    currentDiff),
-                cancellationToken: cancellationToken);
-
-        await SaveArtifactAsync(
-            "quality-report.md",
-            qualityReport,
-            cancellationToken);
-
-        // -------------------------------------------------
-        // 7. Documentation
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[6/8] Running Documentation worker...");
-
-        var documentationSnapshot =
-            RepositorySnapshot.Build(
-                _workspacePath);
-
-        var documentationJson =
-            await ChatRoleAsync(
-                "Docs",
-                Prompts.DocsSystem,
-                Prompts.Docs(
-                    brief,
-                    architecture,
-                    documentationSnapshot,
-                    FormatProcessResult(testResult)),
-                Schemas.FileProposal,
-                cancellationToken);
-
-        await SaveArtifactAsync(
-            "documentation-proposal.json",
-            documentationJson,
-            cancellationToken);
-
-        var documentationProposal =
-            Deserialize<FileProposal>(
-                documentationJson);
-
-        SafeFileApplier.PrintPreview(
-            _workspacePath,
-            documentationProposal);
-
-        if (HumanApproval.Ask(
-                "Apply documentation changes?"))
-        {
-            SafeFileApplier.Apply(
-                _workspacePath,
-                documentationProposal);
-        }
-
-        // -------------------------------------------------
-        // 8. Deployment validation
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[7/8] Deployment validation...");
-
-        ProcessResult publishResult;
-
-        if (HumanApproval.Ask(
-                "Run dotnet publish for deployment validation?"))
-        {
-            publishResult =
-                await RunPublishAsync(
-                    cancellationToken);
-        }
-        else
-        {
-            publishResult =
-                new ProcessResult(
-                    -1,
-                    "",
-                    "Publish was not executed because " +
-                    "the user did not approve it.");
-        }
-
-        await SaveProcessArtifactAsync(
-            "publish-results.txt",
-            publishResult,
-            cancellationToken);
-
-        var deploymentReport =
-            await ChatRoleAsync(
-                "Deployment",
-                Prompts.DeploymentSystem,
-                Prompts.Deployment(
-                    architecture,
-                    FormatProcessResult(publishResult)),
-                cancellationToken: cancellationToken);
-
-        await SaveArtifactAsync(
-            "deployment-validation.md",
-            deploymentReport,
-            cancellationToken);
-
-        var finalDiff =
-            await CaptureGitDiffAsync(
-                cancellationToken);
-
+        var finalDiff = await CaptureGitDiffAsync(cancellationToken);
         await SaveArtifactAsync(
             "git-diff-final.txt",
             finalDiff,
             cancellationToken);
 
-        // -------------------------------------------------
-        // Finished
-        // -------------------------------------------------
-
-        Console.WriteLine(
-            "\n[8/8] Workflow completed.");
-
-        Console.WriteLine(
-            $"Artifacts: {_runDirectory}");
-
+        Console.WriteLine("\nWorkflow completed.");
+        Console.WriteLine($"Artifacts: {_runDirectory}");
         Console.WriteLine();
-        Console.WriteLine(
-            "Inspect the diff before committing:");
-
-        Console.WriteLine(
-            "  git diff");
-
+        Console.WriteLine("Inspect the diff before committing:");
+        Console.WriteLine("  git diff");
         Console.WriteLine();
-        Console.WriteLine(
-            "If satisfied, commit manually.");
+        Console.WriteLine("If satisfied, commit manually.");
     }
 
-    private async Task<FileProposal>
-    GenerateCoderProposalAsync(
+    private async Task<FileProposal> GenerateFileProposalAsync(
         string role,
-        WorkTicket ticket,
-        string architecture,
-        string repositorySnapshot,
+        string systemPrompt,
+        string basePrompt,
+        string artifactPrefix,
+        bool testsOnly,
         CancellationToken cancellationToken)
     {
-        var basePrompt =
-            Prompts.Coder(
-                role,
-                ticket,
-                architecture,
-                repositorySnapshot);
-
         var currentPrompt = basePrompt;
-
-        var artifactPrefix =
-            role.Equals(
-                "CoderA",
-                StringComparison.OrdinalIgnoreCase)
-                ? "worker-a"
-                : "worker-b";
-
         const int maximumAttempts = 3;
 
         for (var attempt = 1; attempt <= maximumAttempts; attempt++)
@@ -466,48 +171,32 @@ public sealed class WorkflowPipeline
             Console.WriteLine(
                 $"  {role} attempt {attempt}/{maximumAttempts}...");
 
-            var json =
-                await ChatRoleAsync(
-                    role,
-                    Prompts.CoderSystem,
-                    currentPrompt,
-                    Schemas.FileProposal,
-                    cancellationToken);
-
+            var json = await ChatRoleAsync(
+                role,
+                systemPrompt,
+                currentPrompt,
+                Schemas.FileProposal,
+                cancellationToken);
             await SaveArtifactAsync(
-                $"{artifactPrefix}-proposal-attempt-{attempt}.json",
+                $"{artifactPrefix}-attempt-{attempt}.json",
                 json,
                 cancellationToken);
 
             try
             {
-                var proposal =
-                    Deserialize<FileProposal>(
-                        json);
+                var proposal = Deserialize<FileProposal>(json);
+                SafeFileApplier.EnsureNoDuplicatePaths(proposal);
+                SafeFileApplier.EnsureValidAgentPaths(
+                    proposal,
+                    testsOnly);
 
-                SafeFileApplier.EnsureNoDuplicatePaths(
-                    proposal);
-
-                SafeFileApplier.EnsureValidCoderPaths(
-                    proposal);
-
-                await SaveArtifactAsync(
-                    $"{artifactPrefix}-proposal.json",
-                    json,
-                    cancellationToken);
-
-                Console.WriteLine(
-                    $"  {role} proposal accepted.");
-
+                Console.WriteLine($"  {role} proposal accepted.");
                 return proposal;
             }
             catch (InvalidOperationException exception)
             {
-                Console.WriteLine(
-                    $"  {role} proposal rejected:");
-
-                Console.WriteLine(
-                    $"    {exception.Message}");
+                Console.WriteLine($"  {role} proposal rejected:");
+                Console.WriteLine($"    {exception.Message}");
 
                 if (attempt == maximumAttempts)
                 {
@@ -518,31 +207,21 @@ public sealed class WorkflowPipeline
                 }
 
                 currentPrompt = $"""
-                {basePrompt}
+                    {basePrompt}
 
-                IMPORTANT CORRECTION
+                    IMPORTANT CORRECTION
 
-                Your previous response was rejected by the
-                orchestrator.
+                    The orchestrator rejected your previous response:
+                    {exception.Message}
 
-                Validation error:
+                    Generate the proposal again from scratch. Correct
+                    the validation problem. Return between 1 and 5 unique
+                    file paths, complete non-empty file contents, and
+                    only paths valid for your assigned role. Do not
+                    create project or solution files.
 
-                {exception.Message}
-
-                Generate the proposal again from scratch.
-
-                Correct the validation problem.
-
-                Remember:
-                - paths must be unique
-                - only DemoApi/ and DemoApi.Tests/ are valid roots
-                - do not create .csproj or .sln files
-                - return between 1 and 5 files
-                - content must contain real complete file contents
-                - do not repeat the previous invalid output
-
-                Return JSON only.
-                """;
+                    Return JSON only.
+                    """;
             }
         }
 
@@ -557,13 +236,9 @@ public sealed class WorkflowPipeline
         JsonElement? responseFormat = null,
         CancellationToken cancellationToken = default)
     {
-        var endpoint =
-            ResolveRole(role);
-
+        var endpoint = ResolveRole(role);
         Console.WriteLine(
-            $"  {role} -> " +
-            $"{endpoint.BaseUrl} -> " +
-            $"{endpoint.Model}");
+            $"  {role} -> {endpoint.BaseUrl} -> {endpoint.Model}");
 
         return await _ollamaClient.ChatAsync(
             endpoint,
@@ -573,25 +248,18 @@ public sealed class WorkflowPipeline
             cancellationToken);
     }
 
-    private ModelEndpointSettings ResolveRole(
-        string role)
+    private ModelEndpointSettings ResolveRole(string role)
     {
-        if (!_settings.RoleBindings.TryGetValue(
-                role,
-                out var endpointName))
+        if (!_settings.RoleBindings.TryGetValue(role, out var endpointName))
         {
             throw new InvalidOperationException(
-                $"No endpoint binding configured " +
-                $"for role '{role}'.");
+                $"No endpoint binding configured for role '{role}'.");
         }
 
-        if (!_settings.Endpoints.TryGetValue(
-                endpointName,
-                out var endpoint))
+        if (!_settings.Endpoints.TryGetValue(endpointName, out var endpoint))
         {
             throw new InvalidOperationException(
-                $"Role '{role}' references unknown " +
-                $"endpoint '{endpointName}'.");
+                $"Role '{role}' references unknown endpoint '{endpointName}'.");
         }
 
         return endpoint;
@@ -599,19 +267,14 @@ public sealed class WorkflowPipeline
 
     private void PrintRoutingTable()
     {
-        Console.WriteLine(
-            "Configured role routing:");
+        Console.WriteLine("Configured role routing:");
 
         foreach (var binding in _settings.RoleBindings)
         {
-            var endpoint =
-                ResolveRole(binding.Key);
-
+            var endpoint = ResolveRole(binding.Key);
             Console.WriteLine(
-                $"  {binding.Key,-12} " +
-                $"-> {binding.Value,-8} " +
-                $"-> {endpoint.BaseUrl} " +
-                $"-> {endpoint.Model}");
+                $"  {binding.Key,-12} -> {binding.Value,-8} " +
+                $"-> {endpoint.BaseUrl} -> {endpoint.Model}");
         }
     }
 
@@ -620,10 +283,7 @@ public sealed class WorkflowPipeline
     {
         return await ProcessRunner.RunAsync(
             "dotnet",
-            [
-                "build",
-                _settings.ApplicationProject
-            ],
+            ["build", _settings.ApplicationProject],
             _repositoryRoot,
             cancellationToken);
     }
@@ -633,33 +293,7 @@ public sealed class WorkflowPipeline
     {
         return await ProcessRunner.RunAsync(
             "dotnet",
-            [
-                "test",
-                _settings.TestProject,
-                "--no-restore"
-            ],
-            _repositoryRoot,
-            cancellationToken);
-    }
-
-    private async Task<ProcessResult> RunPublishAsync(
-        CancellationToken cancellationToken)
-    {
-        var publishDirectory =
-            Path.Combine(
-                _runDirectory,
-                "publish");
-
-        return await ProcessRunner.RunAsync(
-            "dotnet",
-            [
-                "publish",
-                _settings.ApplicationProject,
-                "-c",
-                "Release",
-                "-o",
-                publishDirectory
-            ],
+            ["test", _settings.TestProject, "--no-restore"],
             _repositoryRoot,
             cancellationToken);
     }
@@ -667,16 +301,11 @@ public sealed class WorkflowPipeline
     private async Task<string> CaptureGitDiffAsync(
         CancellationToken cancellationToken)
     {
-        var result =
-            await ProcessRunner.RunAsync(
-                "git",
-                [
-                    "diff",
-                    "--",
-                    _settings.Workspace
-                ],
-                _repositoryRoot,
-                cancellationToken);
+        var result = await ProcessRunner.RunAsync(
+            "git",
+            ["diff", "--", _settings.Workspace],
+            _repositoryRoot,
+            cancellationToken);
 
         return FormatProcessResult(result);
     }
@@ -697,56 +326,43 @@ public sealed class WorkflowPipeline
         string content,
         CancellationToken cancellationToken)
     {
-        var path =
-            Path.Combine(
-                _runDirectory,
-                name);
-
-        await File.WriteAllTextAsync(
-            path,
-            content,
-            cancellationToken);
+        var path = Path.Combine(_runDirectory, name);
+        await File.WriteAllTextAsync(path, content, cancellationToken);
     }
 
-    private static string FormatProcessResult(
-        ProcessResult result)
+    private static ProcessResult NotRun(string reason)
+    {
+        return new ProcessResult(-1, "", reason);
+    }
+
+    private static string FormatProcessResult(ProcessResult result)
     {
         var builder = new StringBuilder();
-
-        builder.AppendLine(
-            $"Exit code: {result.ExitCode}");
-
+        builder.AppendLine($"Exit code: {result.ExitCode}");
         builder.AppendLine();
         builder.AppendLine("STDOUT");
         builder.AppendLine("======");
-        builder.AppendLine(
-            result.StandardOutput);
-
+        builder.AppendLine(result.StandardOutput);
         builder.AppendLine();
         builder.AppendLine("STDERR");
         builder.AppendLine("======");
-        builder.AppendLine(
-            result.StandardError);
+        builder.AppendLine(result.StandardError);
 
         return builder.ToString();
     }
 
-    private static T Deserialize<T>(
-        string json)
+    private static T Deserialize<T>(string json)
     {
         try
         {
-            return JsonSerializer.Deserialize<T>(
-                    json,
-                    JsonOptions)
+            return JsonSerializer.Deserialize<T>(json, JsonOptions)
                 ?? throw new InvalidOperationException(
                     $"Model returned empty {typeof(T).Name}.");
         }
         catch (JsonException exception)
         {
             throw new InvalidOperationException(
-                $"Could not parse model JSON as " +
-                $"{typeof(T).Name}.\n\n" +
+                $"Could not parse model JSON as {typeof(T).Name}.\n\n" +
                 $"MODEL OUTPUT:\n{json}",
                 exception);
         }
