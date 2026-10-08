@@ -1,4 +1,4 @@
-# Opsætningsguide – CrewAI
+# Opsætningsguide - CrewAI
 
 ## 1. Forudsætninger
 
@@ -7,8 +7,37 @@ Installer følgende:
 - Python 3.11
 - Ollama
 - Git
+- Docker Desktop
 
-Kontrollér installationerne i PowerShell:
+Hvis du ikke har disse, så kør følgende i **PowerShell som Administrator**.
+
+### Python 3.11 - install/update
+
+```powershell
+winget install --id Python.Python.3.11 --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+```
+
+### Ollama - install/update
+
+```powershell
+winget install --id Ollama.Ollama --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+```
+
+### Git - install/update
+
+```powershell
+winget install --id Git.Git --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+```
+
+### Docker Desktop - install/update
+
+```powershell
+winget install --id Docker.DockerDesktop --exact --source winget --silent --accept-package-agreements --accept-source-agreements
+```
+
+Start **Docker Desktop** efter installation.
+
+Kontrollér installationerne:
 
 ```powershell
 py -3.11 --version
@@ -22,13 +51,29 @@ ollama --version
 git --version
 ```
 
+```powershell
+docker --version
+```
+
 ---
 
 ## 2. Hent Qwen-modellen
 
-Sørg for, at Ollama-programmet er startet.
+Kontrollér om Ollama allerede kører:
 
-Hent modellen til Architect:
+```powershell
+curl.exe http://localhost:11434
+```
+
+Hvis Ollama ikke allerede kører, start den:
+
+```powershell
+ollama serve
+```
+
+Hent modellen til **Architect - Endpoint 1, port 11434**.
+
+Hvis modellen allerede er installeret, kan dette trin springes over.
 
 ```powershell
 ollama pull qwen3:8b
@@ -48,58 +93,52 @@ qwen3:8b
 
 ---
 
-## 3. Start det andet Ollama-endpoint
+## 3. Start det andet Ollama-endpoint i Docker
 
-Åbn et **nyt PowerShell-vindue**.
+Sørg for, at **Docker Desktop** kører.
 
-Kør:
-
-```powershell
-$env:OLLAMA_HOST = "127.0.0.1:11435"
-```
-
-Derefter:
+Hent Ollama Docker-image:
 
 ```powershell
-ollama serve
+docker pull ollama/ollama
 ```
 
-Lad dette PowerShell-vindue stå åbent, mens demoen køres.
+Opret **Endpoint 2 på port 11435**.
 
-Det første Ollama-endpoint kører på:
+### a) Hvis du ikke bruger en kompatibel NVIDIA GPU
 
-```text
-127.0.0.1:11434
+```powershell
+docker run -d --name ollama-coder --restart unless-stopped -p 127.0.0.1:11435:11434 -v ollama-coder:/root/.ollama ollama/ollama
 ```
 
-Det andet Ollama-endpoint kører på:
+### b) Hvis du har en kompatibel NVIDIA GPU
 
-```text
-127.0.0.1:11435
+```powershell
+docker run -d --name ollama-coder --restart unless-stopped --gpus=all -p 127.0.0.1:11435:11434 -v ollama-coder:/root/.ollama ollama/ollama
+```
+
+### c) Hvis containeren allerede findes
+
+Start den eksisterende container:
+
+```powershell
+docker start ollama-coder
 ```
 
 ---
 
 ## 4. Hent DeepSeek-modellen
 
-Åbn endnu et **nyt PowerShell-vindue**.
-
-Peg Ollama CLI mod endpoint 2:
+Hent modellen til **Developer og Tester** inde i Docker-containeren:
 
 ```powershell
-$env:OLLAMA_HOST = "127.0.0.1:11435"
+docker exec -it ollama-coder ollama pull deepseek-coder:6.7b
 ```
 
-Hent modellen til Developer og Tester:
+Kontrollér at modellen findes på Endpoint 2:
 
 ```powershell
-ollama pull deepseek-coder:6.7b
-```
-
-Kontrollér at modellen findes:
-
-```powershell
-ollama list
+docker exec -it ollama-coder ollama list
 ```
 
 Du skal kunne se:
@@ -108,15 +147,19 @@ Du skal kunne se:
 deepseek-coder:6.7b
 ```
 
-PowerShell-vinduet med `ollama serve` fra trin 3 skal stadig være åbent.
-
 ---
 
 ## 5. Klon projektet
 
 Åbn et nyt PowerShell-vindue.
 
-Kør:
+Gå til `source\repos`, hvis du ikke allerede er der:
+
+```powershell
+if ((Get-Location).Path -ne "$HOME\source\repos") { Set-Location "$HOME\source\repos" }
+```
+
+Klon projektet:
 
 ```powershell
 git clone https://github.com/JaisAndersen/CrewAIDemo.git
@@ -150,7 +193,7 @@ Hvis PowerShell blokerer aktiveringen, kør først:
 Set-ExecutionPolicy -Scope Process Bypass
 ```
 
-Aktivér derefter igen:
+Aktivér derefter miljøet igen:
 
 ```powershell
 .\venv\Scripts\Activate.ps1
@@ -166,13 +209,13 @@ Når miljøet er aktivt, vil terminalen typisk starte med:
 
 ## 7. Installer dependencies
 
-Kør:
+Opdatér pip:
 
 ```powershell
 python -m pip install --upgrade pip
 ```
 
-Derefter:
+Installer projektets dependencies:
 
 ```powershell
 pip install -r requirements.txt
@@ -184,7 +227,31 @@ Vent til installationen er færdig.
 
 ## 8. Kontrollér begge endpoints
 
-Kør:
+Kontrollér **Endpoint 1 - port 11434**:
+
+```powershell
+(Invoke-RestMethod -Uri "http://127.0.0.1:11434/api/tags").models.name
+```
+
+Det skal vise:
+
+```text
+qwen3:8b
+```
+
+Kontrollér **Endpoint 2 - port 11435**:
+
+```powershell
+(Invoke-RestMethod -Uri "http://127.0.0.1:11435/api/tags").models.name
+```
+
+Det skal vise:
+
+```text
+deepseek-coder:6.7b
+```
+
+Kør derefter projektets endpoint-validering:
 
 ```powershell
 python check_endpoints.py
@@ -196,13 +263,6 @@ Til sidst skal der stå:
 
 ```text
 Alt OK - begge endpoints er oppe og ser ud til kun at vaere tilgaengelige lokalt.
-```
-
-Hvis et endpoint fejler, kontrollér at:
-
-```text
-127.0.0.1:11434 kører Ollama
-127.0.0.1:11435 kører det ekstra Ollama-endpoint
 ```
 
 ---
@@ -251,22 +311,3 @@ pytest -v test_todo.py
 ```
 
 Tests skal afslutte uden fejl.
-
----
-
-## Kort oversigt
-
-Forløbet er:
-
-```text
-Installer Python 3.11, Ollama og Git
-→ Hent qwen3:8b
-→ Start Ollama endpoint 2 på port 11435
-→ Hent deepseek-coder:6.7b til endpoint 2
-→ Klon CrewAIDemo
-→ Opret Python virtual environment
-→ Installer requirements.txt
-→ Kontrollér begge endpoints
-→ Kør crew_demo.py
-→ Kør pytest på test_todo.py
-```
