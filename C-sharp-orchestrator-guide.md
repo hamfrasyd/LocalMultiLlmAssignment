@@ -100,7 +100,7 @@ deepseek-coder:6.7b
 Kør:
 
 ```powershell
-git clone -b crewai-version --single-branch https://github.com/hamfrasyd/LocalMultiLlmAssignment.git
+git clone https://github.com/hamfrasyd/LocalMultiLlmAssignment.git
 ```
 
 Gå ind i projektmappen:
