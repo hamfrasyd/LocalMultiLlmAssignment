@@ -50,8 +50,9 @@ public static class Prompts
         - Implement only what the feature brief and architecture require.
         - Return only files that need to be created or changed.
         - Return between 1 and 5 unique repository-relative paths.
-        - Use forward slashes. Paths must begin with DemoApi/,
-          DemoApi.Tests/, or docs/.
+        - Use forward slashes. Paths must begin with DemoApi/ or docs/.
+        - Do not create or modify files under DemoApi.Tests/.
+        - Do not create automated tests. The Tester role is responsible for all test files.
         - Every content value must contain the complete final contents
           of its file.
         - Do not use placeholders, ellipses, shell commands, or
@@ -78,8 +79,9 @@ public static class Prompts
 
         Implement the feature in the existing project based on the
         Architect's plan. Read and extend existing files where
-        appropriate. Include other changes explicitly required by the
-        feature brief, such as documentation.
+        appropriate. Include other implementation changes explicitly required by the
+        feature brief, such as documentation. Do not create test files;
+        testing is handled by the Tester role.
 
         Return the complete contents of every changed or created file
         in the supplied JSON format.

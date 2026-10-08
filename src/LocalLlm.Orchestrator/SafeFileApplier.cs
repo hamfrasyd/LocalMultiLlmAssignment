@@ -74,15 +74,14 @@ public static class SafeFileApplier
                 normalizedPath.StartsWith(
                     "DemoApi.Tests/",
                     StringComparison.OrdinalIgnoreCase);
-            var isAllowed =
-                isTestPath
-                || (!testsOnly
-                    && (normalizedPath.StartsWith(
-                            "DemoApi/",
-                            StringComparison.OrdinalIgnoreCase)
-                        || normalizedPath.StartsWith(
-                            "docs/",
-                            StringComparison.OrdinalIgnoreCase)));
+            var isAllowed = testsOnly
+                ? isTestPath
+                : normalizedPath.StartsWith(
+                    "DemoApi/",
+                    StringComparison.OrdinalIgnoreCase)
+                || normalizedPath.StartsWith(
+                    "docs/",
+                    StringComparison.OrdinalIgnoreCase);
 
             if (!isAllowed)
             {
@@ -92,8 +91,7 @@ public static class SafeFileApplier
                     $"{file.Path}. " +
                     (testsOnly
                         ? "Tester paths must begin with DemoApi.Tests/."
-                        : "Developer paths must begin with DemoApi/, " +
-                          "DemoApi.Tests/, or docs/."));
+                        : "Developer paths must begin with DemoApi/ or docs/."));
             }
 
             if (normalizedPath.EndsWith(
